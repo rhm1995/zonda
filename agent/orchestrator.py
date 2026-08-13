@@ -35,10 +35,22 @@ from pydantic import BaseModel
 
 from agent.agent_definition import build_agent
 from agent.config import Config, load_config
-from core.models import AgentTurnResult, ConversationSession, DraftAnswer, ToolCallLog
+from core.models import AgentTurnResult, ConversationSession, DraftAnswer, PriceLookupResult, ToolCallLog
 from core.repository import Repository
 
 logger = logging.getLogger(__name__)
+
+#: Maps a tool's name to the typed schema its successful ("status": "ok")
+#: dict result should be reconstructed into for `AgentTurnResult.structured_data`.
+#: SPIKE-001 found that the SDK's `ToolCallOutputItem.output` is the tool
+#: function's raw JSON-serialisable return value (a `dict`, per
+#: `median_price_lookup_impl`'s own documented contract) -- never a
+#: `BaseModel` instance -- so it must be reconstructed here, not merely
+#: type-checked. `TASK-009` (Increment 4) extends this table alongside the
+#: tool registry.
+_TOOL_RESULT_SCHEMAS: dict[str, type[BaseModel]] = {
+    "median_price_lookup": PriceLookupResult,
+}
 
 MAX_TURNS = 6  # THR-006/NFR-006: bounds runaway tool-call loops
 RETRY_ATTEMPTS = 2  # 1 bounded retry (design §8.1) = 2 total attempts
@@ -75,12 +87,19 @@ def _unavailable_result(message: str = UNAVAILABLE_MESSAGE) -> AgentTurnResult:
     return AgentTurnResult(status="unavailable", answer_text=message)
 
 
+def _raw_item_get(raw_item: object, key: str) -> object | None:
+    """`raw_item` is a plain `dict` in hand-built test stubs but a typed SDK
+    object (e.g. `ResponseFunctionToolCall`) in real runs -- reads `key`
+    from either shape, never raises."""
+    return raw_item.get(key) if isinstance(raw_item, dict) else getattr(raw_item, key, None)
+
+
 def _tool_call_arguments(raw_item: object) -> dict:
     """Best-effort extraction of a tool call's arguments for observability
     (`ToolCallLog.arguments`) -- never raises; an unparseable/absent
     arguments payload just yields an empty dict rather than failing the
     whole turn over a logging concern."""
-    raw_arguments = raw_item.get("arguments") if isinstance(raw_item, dict) else getattr(raw_item, "arguments", None)
+    raw_arguments = _raw_item_get(raw_item, "arguments")
     if not isinstance(raw_arguments, str):
         return {}
     try:
@@ -90,6 +109,34 @@ def _tool_call_arguments(raw_item: object) -> dict:
     return parsed if isinstance(parsed, dict) else {}
 
 
+def _reconstruct_structured_result(item: ToolCallOutputItem, call_id_to_tool_name: dict[str, str]) -> BaseModel | None:
+    """Recovers a typed result for `structured_data` from a tool call's
+    output. `ToolCallOutputItem.output` is the tool function's raw return
+    value -- confirmed by `SPIKE-001` against a live run to be a plain
+    `dict` (per `median_price_lookup_impl`'s documented "always a JSON-
+    serialisable dict" contract), not a `BaseModel` instance, so success
+    results must be reconstructed via `_TOOL_RESULT_SCHEMAS`, keyed by the
+    call's tool name. Returns `None` (never raises) for error-status
+    outputs, unregistered tools, or a result that doesn't match its
+    schema -- structured_data is best-effort observability, not something
+    a malformed entry should take down the whole turn over."""
+    if isinstance(item.output, BaseModel):  # already typed (e.g. a future tool, or a test stub)
+        return item.output
+    if not isinstance(item.output, dict) or item.output.get("status") != "ok":
+        return None
+    call_id = _raw_item_get(item.raw_item, "call_id")
+    tool_name = call_id_to_tool_name.get(call_id) if isinstance(call_id, str) else None
+    schema = _TOOL_RESULT_SCHEMAS.get(tool_name) if tool_name else None
+    if schema is None:
+        return None
+    fields = {key: value for key, value in item.output.items() if key != "status"}
+    try:
+        return schema.model_validate(fields)
+    except Exception as exc:  # pydantic ValidationError or similar -- log and skip, don't fail the turn
+        logger.warning("Could not reconstruct %s from tool output %r: %s", schema.__name__, item.output, exc)
+        return None
+
+
 def _extract_turn_data(run_result: object, elapsed_ms: float) -> tuple[list[BaseModel], list[ToolCallLog]]:
     """`structured_data` (the typed tool-result objects backing the
     answer) and `tool_calls` (observability log), read from the run's
@@ -97,13 +144,16 @@ def _extract_turn_data(run_result: object, elapsed_ms: float) -> tuple[list[Base
     claims against once `TASK-010` lands (Increment 4)."""
     structured_data: list[BaseModel] = []
     tool_calls: list[ToolCallLog] = []
+    call_id_to_tool_name: dict[str, str] = {}
     for item in getattr(run_result, "new_items", []):
-        if isinstance(item, ToolCallOutputItem) and isinstance(item.output, BaseModel):
-            structured_data.append(item.output)
-        elif isinstance(item, ToolCallItem):
+        if isinstance(item, ToolCallItem):
+            call_id = _raw_item_get(item.raw_item, "call_id")
+            tool_name = item.tool_name or "unknown"
+            if isinstance(call_id, str):
+                call_id_to_tool_name[call_id] = tool_name
             tool_calls.append(
                 ToolCallLog(
-                    tool_name=item.tool_name or "unknown",
+                    tool_name=tool_name,
                     arguments=_tool_call_arguments(item.raw_item),
                     # Per-tool-call timing isn't exposed at this level of the SDK's
                     # result object; this story approximates with the whole turn's
@@ -111,6 +161,10 @@ def _extract_turn_data(run_result: object, elapsed_ms: float) -> tuple[list[Base
                     latency_ms=elapsed_ms,
                 )
             )
+        elif isinstance(item, ToolCallOutputItem):
+            structured = _reconstruct_structured_result(item, call_id_to_tool_name)
+            if structured is not None:
+                structured_data.append(structured)
     return structured_data, tool_calls
 
 

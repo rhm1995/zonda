@@ -28,12 +28,17 @@ from dotenv import load_dotenv
 
 #: Sourced from SPIKE-001 (ADR-007, v4): the one tested default OpenAI
 #: model, confirmed for key access, function calling, structured outputs,
-#: and CON-002 compliance (below "GPT-5.5", non-"Pro"). SPIKE-001 has not
-#: yet run (it is not on Increment 1's critical path -- backlog §5,
-#: Increment 3 entry criteria); this is a documented placeholder pending
-#: that confirmation, per this task's own stated open question. Update this
-#: constant, and only this constant, once SPIKE-001 reports its finding.
-TESTED_DEFAULT_MODEL = "gpt-4o-mini"  # placeholder pending SPIKE-001 (see docstring)
+#: and CON-002 compliance (below "GPT-5.5", non-"Pro"). SPIKE-001 ran
+#: 2026-08-13 against a live key: key access confirmed (models.retrieve),
+#: function calling confirmed (real median_price_lookup call with correctly
+#: extracted arguments), structured outputs confirmed (valid DraftAnswer
+#: returned, including a properly evidenced GroundedClaim), and CON-002
+#: compliance holds by inspection (gpt-4o-mini is neither "GPT-5.5"-or-above
+#: nor "Pro" tier). The spike also surfaced and fixed two real bugs (see
+#: agent/agent_definition.py's _MONTH_ALIASES and
+#: agent/orchestrator.py's _reconstruct_structured_result) that only
+#: manifested against the real API, not the stubbed test suite.
+TESTED_DEFAULT_MODEL = "gpt-4o-mini"
 
 
 class ConfigError(Exception):

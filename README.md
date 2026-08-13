@@ -14,14 +14,16 @@ API** and are fully functional with no API key configured (`BR-003`,
 > premium, Plotly chart, CSV export) — both proven, by an automated test,
 > to make zero OpenAI API calls — plus a working "Ask the data" tab that
 > answers a single factual question end to end via the OpenAI Agents SDK.
-> **`SPIKE-001` (confirming the tested default model against a live
-> credential) has not yet run** — no `OPENAI_API_KEY` was available while
-> building this increment, so `TESTED_DEFAULT_MODEL` in `agent/config.py`
-> is a documented placeholder (`gpt-4o-mini`), not an empirically confirmed
-> value. Set a real key, run `SPIKE-001`'s checks, and update that one
-> constant before relying on "Ask the data" for anything beyond structural
-> testing. Comparison/trend/ranking/premium questions, follow-ups, and
-> full grounding validation arrive in Increment 4.
+> **`SPIKE-001` ran on 2026-08-13 against a live credential** and confirmed
+> `gpt-4o-mini` (`TESTED_DEFAULT_MODEL` in `agent/config.py`) for key
+> access, function calling, structured outputs, and `CON-002` compliance.
+> The live run also surfaced and fixed two real bugs the stubbed test
+> suite couldn't catch — a numeric-month tool argument ("09" vs.
+> "September") that caused an infinite retry loop, and `structured_data`
+> never populating because the SDK's real tool output is a plain `dict`,
+> not a `BaseModel` — both now covered by regression tests. Comparison/
+> trend/ranking/premium questions, follow-ups, and full grounding
+> validation arrive in Increment 4.
 
 ## Setup
 

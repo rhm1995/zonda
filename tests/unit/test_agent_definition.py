@@ -39,6 +39,18 @@ def test_median_price_lookup_impl_accepts_month_abbreviation(real_repository: Re
     assert result["price_gbp"] == 495000
 
 
+def test_median_price_lookup_impl_accepts_numeric_month(real_repository: Repository) -> None:
+    """Regression test for a bug SPIKE-001's live run surfaced: a real
+    model call chose "09" over "September" for the same question, and
+    _MONTH_ALIASES (name/abbreviation-only, at the time) rejected it --
+    causing a retry loop that exhausted MAX_TURNS. Both zero-padded and
+    bare numeral forms must resolve."""
+    for numeral in ("9", "09"):
+        result = median_price_lookup_impl(real_repository, "Manchester", EXISTING, numeral, 2025)
+        assert result["status"] == "ok", f"month={numeral!r} should resolve to September"
+        assert result["price_gbp"] == 400000
+
+
 def test_median_price_lookup_impl_out_of_coverage_area_never_fabricates(
     real_repository: Repository,
 ) -> None:

@@ -14,8 +14,9 @@ dependencies = [
     "plotly>=5.22",
     "python-dotenv>=1.0",
     # agent/config.py's fail-fast model-availability check only (TASK-013).
-    # The Agents SDK integration itself is Increment 3 (STORY-003) scope.
     "openai>=1.40",
+    # Agents SDK integration (Increment 3, STORY-003) — agent/agent_definition.py, agent/orchestrator.py
+    "openai-agents>=0.20",
     # Ingestion pipeline only (CON-008/CON-009) — never imported by the runtime app
     "pandas>=2.2",
     "openpyxl>=3.1",

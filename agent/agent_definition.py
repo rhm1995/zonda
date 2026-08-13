@@ -52,12 +52,14 @@ for a missing/suppressed value that the tool result did not itself state.
 
 #: The dataset's fixed quarterly rolling-year-ending convention (design
 #: §6.4) -- the only months a period can end on. Maps common spellings
-#: (full name or abbreviation) to the ONS label's 3-letter form.
+#: (full name, abbreviation, or numeral -- confirmed necessary by SPIKE-001:
+#: a live model call chose "09" over "September" for the same question)
+#: to the ONS label's 3-letter form.
 _MONTH_ALIASES: dict[str, str] = {
-    "mar": "Mar", "march": "Mar",
-    "jun": "Jun", "june": "Jun",
-    "sep": "Sep", "sept": "Sep", "september": "Sep",
-    "dec": "Dec", "december": "Dec",
+    "mar": "Mar", "march": "Mar", "3": "Mar", "03": "Mar",
+    "jun": "Jun", "june": "Jun", "6": "Jun", "06": "Jun",
+    "sep": "Sep", "sept": "Sep", "september": "Sep", "9": "Sep", "09": "Sep",
+    "dec": "Dec", "december": "Dec", "12": "Dec",
 }
 
 
@@ -126,7 +128,9 @@ def build_median_price_lookup_tool(repository: Repository) -> FunctionTool:
         description_override=(
             "Look up the median price of a detached house (newly built or existing) for one "
             "England/Wales local authority and one quarter-end period (month + year). Always "
-            "call this before stating any price figure."
+            "call this before stating any price figure. `month` accepts a name ('September'), "
+            "abbreviation ('Sep'), or number (9 or '09') -- only March, June, September, and "
+            "December are valid quarter-end months."
         ),
     )
     def median_price_lookup_tool(

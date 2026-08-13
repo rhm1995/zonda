@@ -160,6 +160,53 @@ def test_unexpected_final_output_type_fails_safe_to_unavailable(real_repository:
     assert result.status == "unavailable"
 
 
+def test_structured_data_is_reconstructed_from_a_real_dict_tool_output(real_repository: Repository) -> None:
+    """Regression test for a bug SPIKE-001's live run surfaced: the real
+    Agents SDK sets `ToolCallOutputItem.output` to the tool function's raw
+    return value -- a plain `dict` per `median_price_lookup_impl`'s own
+    documented contract -- never a `BaseModel` instance. The earlier
+    hand-built stub in `_draft_answer_run_result` used a real
+    `PriceLookupResult` for `.output`, which passed but didn't match
+    reality; this test uses a plain dict, as the live SDK actually does."""
+    tool_call = ToolCallItem(
+        agent=_STUB_AGENT,
+        raw_item={
+            "type": "function_call",
+            "name": "median_price_lookup",
+            "call_id": "call_real_1",
+            "arguments": '{"area": "Manchester", "dataset": "existing", "month": "September", "year": 2025}',
+        },
+    )
+    tool_output = ToolCallOutputItem(
+        agent=_STUB_AGENT,
+        raw_item={"type": "function_call_output", "call_id": "call_real_1", "output": "..."},
+        output={  # a plain dict, as the real SDK actually returns -- not a BaseModel
+            "status": "ok",
+            "la_code": "E08000003",
+            "la_name": "Manchester",
+            "dataset": "existing",
+            "period_label": "Year ending Sep 2025",
+            "price_gbp": 400000,
+            "suppressed": False,
+        },
+    )
+    draft_answer = DraftAnswer(answer_text="The median price was £400,000.")
+    run_result = SimpleNamespace(final_output=draft_answer, new_items=[tool_call, tool_output])
+
+    result = answer_question(
+        EMPTY_SESSION,
+        "What was the median price of an existing detached house in Manchester in September 2025?",
+        config=AVAILABLE_CONFIG,
+        repository=real_repository,
+        run_agent=lambda *a, **k: run_result,
+    )
+    assert result.status == "answered"
+    assert len(result.structured_data) == 1
+    assert isinstance(result.structured_data[0], PriceLookupResult)
+    assert result.structured_data[0].price_gbp == 400000
+    assert result.structured_data[0].la_name == "Manchester"
+
+
 def test_never_raises_for_expected_failure_modes(real_repository: Repository) -> None:
     """answer_question's own contract (design §8.2): never raises for
     missing key or API failure -- both surface as `status`, not an
