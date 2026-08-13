@@ -1,0 +1,39 @@
+[project]
+name = "housing-market-insights-agent"
+version = "0.1.0"
+description = "Housing Market Insights Agent — a three-tab Streamlit dashboard for UK detached-house price analysis (ONS HM Land Registry data), with a deterministic analysis core and an OpenAI-agent-backed chat tab."
+requires-python = ">=3.11"
+readme = "README.md"
+
+dependencies = [
+    # Runtime — dashboard shell, config, deterministic core, "Explore trends" (Increment 1)
+    "streamlit>=1.38",
+    "duckdb>=1.0",
+    "pyarrow>=17.0",
+    "pydantic>=2.7",
+    "plotly>=5.22",
+    "python-dotenv>=1.0",
+    # agent/config.py's fail-fast model-availability check only (TASK-013).
+    # The Agents SDK integration itself is Increment 3 (STORY-003) scope.
+    "openai>=1.40",
+    # Ingestion pipeline only (CON-008/CON-009) — never imported by the runtime app
+    "pandas>=2.2",
+    "openpyxl>=3.1",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0",
+    "mypy>=1.10",
+]
+
+[tool.setuptools.packages.find]
+include = ["core*", "data_pipeline*", "agent*", "ui*", "eval*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+[tool.mypy]
+python_version = "3.13"
+files = ["core", "data_pipeline", "agent", "ui"]
+ignore_missing_imports = true

@@ -1,0 +1,21 @@
+{
+  "source": {
+    "new_build": {
+      "url": "https://www.ons.gov.uk/file?uri=/peoplepopulationandcommunity/housing/datasets/medianhousepricesforadministrativegeographiesnewlybuiltdwellings/yearendingseptember2025/medianpricepaidforadministrativegeographiesnew.xlsx",
+      "filename": "newbuild.xlsx",
+      "sha256": "39e2740d10585f11bd61959117c72f4e3cf351a985ed8b9e91440b8bfb128dda"
+    },
+    "existing": {
+      "url": "https://www.ons.gov.uk/file?uri=/peoplepopulationandcommunity/housing/datasets/medianhousepricesforadministrativegeographiesexistingdwellings/yearendingseptember2025/medianpricepaidforadministrativegeographiesexisting.xlsx",
+      "filename": "existing.xlsx",
+      "sha256": "fba3e10ed2a2b32bfb6735b10c3b43b14dec689aeca9dee552151cbc2a9e401b"
+    }
+  },
+  "edition": "Year ending September 2025",
+  "build_timestamp": "2026-08-13T14:07:50.978836+00:00",
+  "counts": {
+    "local_authorities": 318,
+    "periods": 120,
+    "price_points": 76320
+  }
+}
