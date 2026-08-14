@@ -1,0 +1,105 @@
+# Zero-cost dashboard-tab fixtures (TASK-014, design §13) -- invoked
+# directly through core.tools/core.repository, the same shared computation
+# layer ui/explore_trends.py and ui/compare_rank.py call (ADR-011). Never
+# constructs an OpenAI client; the harness wraps this whole file's run in
+# an "openai.OpenAI forbidden" guard (mirrors TASK-008's own mechanism) so
+# that guarantee is enforced, not just assumed. Every expected value below
+# was read directly from the real bundled processed dataset.
+
+- id: dashboard-explore-trends-price-mode-manchester
+  category: happy_path
+  description: >
+    STORY-001's core scenario -- "Explore trends", price mode, Manchester
+    existing dwellings, 2015-2025.
+  tool: growth_metrics
+  args:
+    area: E08000003
+    dataset: existing
+    period_start_label: "Year ending Sep 2015"
+    period_end_label: "Year ending Sep 2025"
+  tolerance: 0.5
+  expected:
+    latest_price: 400000
+    growth_gbp: 180000
+    growth_pct: 81.82
+    cagr_pct: 6.16
+
+- id: dashboard-explore-trends-premium-mode-manchester
+  category: happy_path
+  description: >
+    STORY-001's core scenario -- "Explore trends", premium mode,
+    Manchester at "Year ending Sep 2025" (the design's own confirmed spot
+    check: 23.75% / £95,000).
+  tool: new_build_premium
+  args:
+    area: E08000003
+    period_label: "Year ending Sep 2025"
+  tolerance: 0.5
+  expected:
+    new_build_price: 495000
+    existing_price: 400000
+    premium_pct: 23.75
+    premium_gbp: 95000
+
+- id: dashboard-compare-rank-top5-premium-change
+  category: happy_path
+  description: >
+    STORY-002's core scenario -- "Compare and rank" top-5 by new-build
+    premium change, 2015-2025 (mirrors example Q4). Only the #1 row is
+    asserted; the full top-5 is independently verified in the equivalent
+    chat fixture.
+  tool: rank_areas
+  args:
+    metric: premium_percentage_point_change
+    period_start_label: "Year ending Sep 2015"
+    period_end_label: "Year ending Sep 2025"
+    scope: all
+    top_n: 5
+    direction: top
+  tolerance: 0.5
+  expected:
+    rows:
+      - la_code: E08000003
+        la_name: Manchester
+        value: 42.84
+
+- id: dashboard-compare-areas-manchester-birmingham-leeds
+  category: happy_path
+  description: >
+    STORY-002's core scenario -- "Compare and rank" comparing a fixed,
+    named set of areas by new-build price growth, 2015-2025.
+  tool: compare_areas
+  args:
+    areas: [E08000003, E08000025, E08000035]
+    metric: growth_pct
+    period_start_label: "Year ending Sep 2015"
+    period_end_label: "Year ending Sep 2025"
+    dataset: new_build
+  tolerance: 0.5
+  expected:
+    areas:
+      - la_code: E08000003
+        value: 178.10
+      - la_code: E08000025
+        value: 62.91
+      - la_code: E08000035
+        value: 36.80
+
+- id: dashboard-suppressed-value-gap
+  category: edge_case
+  description: >
+    Requirements §13 -- "Explore trends" a selected period range includes
+    a suppressed period: Blackburn with Darwen's new-build premium is
+    unavailable at "Year ending Sep 2010" because its new-build component
+    is suppressed -- must be an explicit None, never a fabricated or
+    zero-valued premium.
+  tool: new_build_premium
+  args:
+    area: E06000008
+    period_label: "Year ending Sep 2010"
+  tolerance: 0.5
+  expected:
+    new_build_price: null
+    existing_price: 182000
+    premium_pct: null
+    premium_gbp: null

@@ -10,11 +10,25 @@ DuckDB object (CON-008/CON-009).
 Every method's SQL text is a fixed literal, reviewed once; only bound
 parameter values vary at call time (defends THR-007 structurally, not by
 runtime filtering) -- see `tests/unit/test_repository.py`'s static check.
+
+**Thread safety (found via TASK-009's live-API testing, Increment 4):** the
+OpenAI Agents SDK executes multiple tool calls from the same turn
+concurrently, on separate threads. A single `duckdb.DuckDBPyConnection` is
+not safe for concurrent `execute()` calls from multiple threads -- confirmed
+directly: concurrent queries against the *same* known value intermittently
+returned empty results (a real query silently, non-deterministically
+returning no rows, not merely a slower response). Every query in this
+module is therefore serialised through one `threading.Lock` -- correct and
+simple to reason about at this dataset's volume/query latency (sub-
+millisecond DuckDB queries over ~76k cells), where lock contention is not a
+performance concern; a connection-per-thread pattern would remove the lock
+but adds real complexity for no measured benefit here.
 """
 
 from __future__ import annotations
 
 import json
+import threading
 from datetime import date
 from pathlib import Path
 from typing import Literal
@@ -28,10 +42,13 @@ from core.models import LocalAuthority, Period, PremiumRow, PricePoint
 class Repository:
     """Owns the DuckDB connection and every parameterised query the rest of
     the system reads through. Construct once at app startup (`Repository.open`)
-    and reuse for the process lifetime."""
+    and reuse for the process lifetime. Safe for concurrent use from
+    multiple threads (queries are serialised via an internal lock -- see
+    module docstring)."""
 
     def __init__(self, connection: duckdb.DuckDBPyConnection) -> None:
         self._connection = connection
+        self._lock = threading.Lock()
 
     @classmethod
     def open(cls, processed_dir: Path) -> "Repository":
@@ -90,7 +107,8 @@ class Repository:
                 raise RepositoryStartupError(
                     f"{source} does not record an expected '{name}' count"
                 )
-            fetched = self._connection.execute(sql).fetchone()
+            with self._lock:
+                fetched = self._connection.execute(sql).fetchone()
             if fetched is None:
                 raise RepositoryStartupError(f"Count query for '{name}' returned no row")
             (actual,) = fetched
@@ -122,11 +140,12 @@ class Repository:
               AND (? IS NULL OR period_end_date <= ?)
             ORDER BY period_end_date
         """
-        rows = self._connection.execute(
-            sql,
-            [la_code, dataset, period_start, period_start, period_end, period_end],
-        ).fetchall()
-        columns = [d[0] for d in self._connection.description]
+        with self._lock:
+            rows = self._connection.execute(
+                sql,
+                [la_code, dataset, period_start, period_start, period_end, period_end],
+            ).fetchall()
+            columns = [d[0] for d in self._connection.description]
         return [PricePoint(**dict(zip(columns, row))) for row in rows]
 
     def get_premium_series(
@@ -153,8 +172,9 @@ class Repository:
               AND nb.period_end_date BETWEEN ? AND ?
             ORDER BY nb.period_end_date
         """
-        rows = self._connection.execute(sql, [la_code, period_start, period_end]).fetchall()
-        columns = [d[0] for d in self._connection.description]
+        with self._lock:
+            rows = self._connection.execute(sql, [la_code, period_start, period_end]).fetchall()
+            columns = [d[0] for d in self._connection.description]
         return [PremiumRow(**dict(zip(columns, row))) for row in rows]
 
     def get_price_series_multi(
@@ -174,10 +194,11 @@ class Repository:
               AND period_end_date BETWEEN ? AND ?
             ORDER BY la_code, period_end_date
         """
-        rows = self._connection.execute(
-            sql, [la_codes, dataset, period_start, period_end]
-        ).fetchall()
-        columns = [d[0] for d in self._connection.description]
+        with self._lock:
+            rows = self._connection.execute(
+                sql, [la_codes, dataset, period_start, period_end]
+            ).fetchall()
+            columns = [d[0] for d in self._connection.description]
         return [PricePoint(**dict(zip(columns, row))) for row in rows]
 
     def get_geography_reference(self) -> list[LocalAuthority]:
@@ -185,8 +206,9 @@ class Repository:
         `ui/compare_rank.py`) and the alias table behind the geography
         resolver (Increment 4)."""
         sql = "SELECT la_code, la_name, region_country_code, region_country_name, aliases FROM geography_reference ORDER BY la_name"
-        rows = self._connection.execute(sql).fetchall()
-        columns = [d[0] for d in self._connection.description]
+        with self._lock:
+            rows = self._connection.execute(sql).fetchall()
+            columns = [d[0] for d in self._connection.description]
         return [LocalAuthority(**dict(zip(columns, row))) for row in rows]
 
     def get_period_reference(self) -> list[Period]:
@@ -194,5 +216,6 @@ class Repository:
         period-selector population and (Increment 4) the period resolver's
         latest-period anchor and nearest-period suggestions."""
         sql = "SELECT DISTINCT period_label, period_end_date FROM price_points ORDER BY period_end_date"
-        rows = self._connection.execute(sql).fetchall()
+        with self._lock:
+            rows = self._connection.execute(sql).fetchall()
         return [Period(label=label, end_date=end_date) for label, end_date in rows]

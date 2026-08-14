@@ -17,9 +17,13 @@ dependencies = [
     "openai>=1.40",
     # Agents SDK integration (Increment 3, STORY-003) — agent/agent_definition.py, agent/orchestrator.py
     "openai-agents>=0.20",
+    # Fuzzy geography matching (Increment 4, TASK-011) — core/geography.py
+    "rapidfuzz>=3.0",
     # Ingestion pipeline only (CON-008/CON-009) — never imported by the runtime app
     "pandas>=2.2",
     "openpyxl>=3.1",
+    # Evaluation fixture files (Increment 5, TASK-014) — eval/fixtures.py only
+    "pyyaml>=6.0",
 ]
 
 [project.optional-dependencies]
@@ -36,5 +40,5 @@ testpaths = ["tests"]
 
 [tool.mypy]
 python_version = "3.13"
-files = ["core", "data_pipeline", "agent", "ui"]
+files = ["core", "data_pipeline", "agent", "ui", "eval"]
 ignore_missing_imports = true

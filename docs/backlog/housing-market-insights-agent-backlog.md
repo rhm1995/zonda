@@ -38,7 +38,7 @@ Impact is otherwise contained: no issue's Epic, delivery increment, or dependenc
 
 Impact is contained to `TASK-010` (rewritten in full, same reason class as `TASK-006`'s v11 rewrite) and light traceability/implementation-note touches on `STORY-003`, `STORY-004`, `STORY-005`, `STORY-006`. No issue's Epic, delivery increment, or dependency shape changes — `TASK-010` still blocks the same three stories it always did, and no new ticket is created.
 
-**Key blockers going in:** none are backlog-blocking. One spike (`SPIKE-001`, confirming a tested default OpenAI model — access, function calling, structured outputs, restriction compliance, one representative query — under the provisioned credential) sits ahead of Increment 3 and should be run as early as convenient, since it has no dependency on Increments 1–2. One designer recommendation (`ADR-010`'s partial-answer policy) is not yet stakeholder-confirmed and is carried as an open question on `STORY-007` rather than silently assumed.
+**Key blockers going in:** none are backlog-blocking. One spike (`SPIKE-001`, confirming a tested default OpenAI model — access, function calling, structured outputs, restriction compliance, one representative query — under the provisioned credential) sits ahead of Increment 3 and should be run as early as convenient, since it has no dependency on Increments 1–2; **resolved 2026-08-13, confirmed `gpt-4o-mini`.** `ADR-010`'s partial-answer policy, previously an open question on `STORY-007`, was **confirmed by the stakeholder on 2026-08-13** as partial-answer-with-caveat, matching the designer's original recommendation.
 
 **Increment overview:**
 
@@ -61,7 +61,7 @@ Impact is contained to `TASK-010` (rewritten in full, same reason class as `TASK
 - `SPIKE-001` blocks `STORY-003` (and, transitively, all of Increment 4) until a tested default OpenAI model is confirmed under the assessment's provisioned key (`ADR-007`, v4). Tickets are fully preparable now; the agent-backed work simply cannot *start* until this resolves.
 
 **Non-blocking refinement (proceeding under documented assumption, per design/requirements):**
-- `ADR-010`'s mixed-coverage partial-answer policy is a designer recommendation, not a stakeholder confirmation. `STORY-007` proceeds under it as a documented assumption; reversing it later is low-cost (an isolated policy change inside one guardrail component).
+- `ADR-010`'s mixed-coverage partial-answer policy was a designer recommendation; **confirmed by the stakeholder on 2026-08-13** as final. `STORY-007`'s implementation is unchanged.
 - The 8–12h effort guideline (`CON-005`) is now under real pressure given the addendum's added scope (design `RSK-006`), further compounded by the DuckDB migration's added implementation time (design `RSK-007`). Not blocking, but tracked as `BDR-001`/`BDR-005` (§9) with an explicit protection order if time runs short.
 - `NFR-002`/`NFR-006`/`NFR-008`/`NFR-009` have no numeric target in the source (design §2/§8). Acceptance criteria below use qualitative, testable phrasing instead of inventing thresholds, per the acceptance-criteria rules.
 
@@ -104,7 +104,7 @@ Impact is contained to `TASK-010` (rewritten in full, same reason class as `TASK
 | EPIC-07 | Evaluation & Automated Test Suite | A runnable, evidence-producing evaluation across chat and dashboard behaviour | FR-020, NFR-010 · CMP-013 | `python -m eval.run_eval` reports pass/fail per fixture across all requirements-package §13 categories |
 | EPIC-08 | Hardening, Documentation & Release Packaging | A reviewer can go from a clean clone to a working, tested, documented app | BR-002, NFR-007, NFR-008, CON-004 · design §12 (observability) | README-only walkthrough succeeds on a clean environment; package assembled with no secrets present |
 
-**Risks/assumptions shared across all epics:** `RSK-006`/`BDR-001` (effort-vs-scope pressure, §9); `ADR-007` (v4, tested default model, resolved by `SPIKE-001`, `BDR-002`); `ADR-010` (partial-answer policy, open question on `STORY-007`); `RSK-007`/`BDR-005` (DuckDB migration's schedule and install-friction risk, §9); `RSK-009`/`BDR-006` (v10, `Period`-typing's wide-but-mechanical blast radius, §9); `RSK-010`/`BDR-007` (v11/v13, causal-language and suppression-cause heuristic checks are a soft, not hard, guarantee, §9).
+**Risks/assumptions shared across all epics:** `RSK-006`/`BDR-001` (effort-vs-scope pressure, §9); `ADR-007` (v4, tested default model, resolved by `SPIKE-001`, `BDR-002`); `ADR-010` (partial-answer policy, resolved 2026-08-13, `BDR-003`); `RSK-007`/`BDR-005` (DuckDB migration's schedule and install-friction risk, §9); `RSK-009`/`BDR-006` (v10, `Period`-typing's wide-but-mechanical blast radius, §9); `RSK-010`/`BDR-007` (v11/v13, causal-language and suppression-cause heuristic checks are a soft, not hard, guarantee, §9).
 
 ---
 
@@ -136,7 +136,7 @@ Impact is contained to `TASK-010` (rewritten in full, same reason class as `TASK
 **Entry criteria:** Increment 3 complete.
 **Included issues:** `TASK-009`, `TASK-010`, `TASK-011`, `TASK-006`, `TASK-018`, `TASK-019`, `STORY-004`, `STORY-008`, `STORY-007`, `STORY-005`, `STORY-006`.
 **Exit criteria:** all seven illustrative brief questions and the follow-up example are answered correctly through "Ask the data"; a deliberately ambiguous area name triggers clarification, not a guess; a deliberately out-of-coverage question (Glasgow/Edinburgh/Scotland) is explained, not hallucinated; a bare-year period question states its assumption explicitly; an out-of-range period question offers nearest-available suggestions; an open-ended question returns three distinct-category, non-causal observations; the prompt-injection fixture passes all four required behaviours.
-**Decision gate:** confirm or override `ADR-010`'s partial-answer policy (`STORY-007`'s open question) before sign-off.
+**Decision gate:** ~~confirm or override `ADR-010`'s partial-answer policy (`STORY-007`'s open question) before sign-off~~ — **resolved 2026-08-13**, stakeholder confirmed partial-answer-with-caveat.
 
 ### Increment 5 — Evaluation
 **Demonstrable outcome:** a runnable evaluation harness with evidence, covering both the agent and the two deterministic tabs.
@@ -1532,7 +1532,7 @@ Directly implements `FR-011`, using `TASK-011`'s `ambiguous` resolution status.
 As an analyst, I want a question referencing Glasgow, Edinburgh, or Scotland to be honestly explained as outside the supplied data rather than answered with fabricated figures — and, where my question also names covered areas, to still get a full answer for those — so that I can trust the assistant even on the brief's hardest examples.
 
 **Context**
-This is the design's single most consequential grounding demonstration (design §7.3, `RSK-005` in the requirements package): three of the brief's seven illustrative questions reference Scotland. `ADR-010` (the partial-answer-with-caveat policy) is a **designer recommendation, not yet stakeholder-confirmed** — flagged explicitly below rather than treated as settled.
+This is the design's single most consequential grounding demonstration (design §7.3, `RSK-005` in the requirements package): three of the brief's seven illustrative questions reference Scotland. `ADR-010` (the partial-answer-with-caveat policy) was a designer recommendation, **confirmed by the stakeholder on 2026-08-13** as final — flagged explicitly below for the historical record rather than silently edited away.
 
 **Scope**
 - Agent/guardrail behaviour on receiving an `out_of_coverage` `GeographyMatch` (`TASK-011`): state clearly that the area/region is outside the supplied England & Wales HM Land Registry data, and why.
@@ -1572,7 +1572,7 @@ This is the design's single most consequential grounding demonstration (design �
 - Example transcripts for the Glasgow/Edinburgh/Manchester comparison and the Scotland analysis are captured for `TASK-016` (README examples), since these are the strongest evidence of grounded behaviour.
 
 **Open questions**
-- **`ADR-010`'s partial-answer-with-caveat policy is a designer recommendation, not stakeholder-confirmed.** Before this story is signed off as Done, confirm with the product owner whether partial answers are acceptable or whether mixed-coverage requests should instead receive a full refusal. Owner: product owner. Blocks final sign-off, not implementation start (the policy is cheap to reverse if needed — see design `ADR-010` consequences).
+- ~~`ADR-010`'s partial-answer-with-caveat policy is a designer recommendation, not stakeholder-confirmed.~~ **Resolved 2026-08-13**: product owner confirmed partial-answer-with-caveat as final. `STORY-007`'s implementation required no change. This story is clear to sign off as Done on this point.
 
 ---
 
@@ -1852,7 +1852,7 @@ A concise, practical README covering prerequisites/setup, how to run and use the
 **Acceptance criteria**
 1. Given a reviewer with no prior context, when they follow the README from a clean environment, then they can install, configure credentials (or skip that step entirely for the two deterministic tabs), run the app, and run tests/evaluation without external help.
 2. The README explicitly states that "Explore trends" and "Compare and rank" require no API key.
-3. The README's limitations section states the `ADR-010` open question (§9 `BDR`, this backlog) if it remains unresolved at time of writing.
+3. ~~The README's limitations section states the `ADR-010` open question (§9 `BDR`, this backlog) if it remains unresolved at time of writing.~~ N/A — resolved 2026-08-13, stakeholder confirmed partial-answer-with-caveat; nothing outstanding to document.
 4. At least four example queries/outputs are included, covering at least one dashboard-tab example and one chat example (including the Scotland/Glasgow/Edinburgh grounding case).
 
 **Verification**
@@ -1869,7 +1869,7 @@ A concise, practical README covering prerequisites/setup, how to run and use the
 - Components: None (documentation artefact)
 - Interfaces or schemas: None
 - ADRs: All (summarised)
-- Threats, risks, or assumptions: RSK-006 (design), ADR-010 (open question)
+- Threats, risks, or assumptions: RSK-006 (design), ADR-010 (resolved 2026-08-13)
 
 **Definition of done additions**
 - None beyond the shared DoD.
@@ -2137,7 +2137,7 @@ Every mandatory requirement, component, interface, and material threat from the 
 | --- | --- | --- | --- | --- | --- | --- |
 | BDR-001 (corrected) | The addendum's added scope (21 new Must-priority FRs) inside the unchanged 8–12h guideline means indicative effort now runs ≈10–12.5h (design `RSK-006`), with little slack | Some Must-priority scope may not complete if the guideline is enforced as a hard cap | All | Engineering lead | **Revised protection order** (the previous version of this row wrongly treated the two dashboard tabs as a block to protect ahead of Increment 4's `STORY-005`/`STORY-006` — but follow-ups (`FR-008`) and broad insight synthesis (`FR-009`) are explicit, Must-priority requirements from the original brief, while the three-tab dashboard is a later stakeholder addendum; protecting dashboard breadth ahead of them risked a polished app that doesn't fully answer the assessed brief). If time runs short, protect in this order: **(1)** data correctness and ingestion (`TASK-001`, `TASK-002`); **(2)** deterministic analysis functions (`TASK-003`–`005`); **(3)** core agent question answering and grounding (`STORY-003`, `TASK-010`); **(4)** required multi-step questions, follow-ups, and broad insight (`STORY-004`, `STORY-005`, `STORY-006`, `TASK-006`, `TASK-009`); **(5)** evaluation and README (`TASK-014`, `TASK-016`); **(6)** basic deterministic dashboards (`STORY-001`, `STORY-002`); **(7)** dashboard polish, secondary controls, and extensive CSV/UI refinement — the first place to cut. If cuts are still unavoidable after exhausting (7), simplify dashboard presentation (item 6/7) further before removing `STORY-005` or `STORY-006` outright. Document any cut explicitly in `TASK-016`'s README limitations section rather than silently dropping it | After Increment 2 closes — reassess remaining time against Increments 3–6 |
 | BDR-002 | `ADR-007`'s (v4) exact tested default model is unconfirmed until `SPIKE-001` runs — no substring deny-list exists anymore to fall back on if this slips | `STORY-003` and everything in Increment 4 cannot start | SPIKE-001, TASK-013, STORY-003 | Engineer running the spike | Run `SPIKE-001` as early as convenient — it has no dependency on Increments 1–2 and should not be left until Increment 3 begins | Before Increment 3 starts |
-| BDR-003 | `ADR-010`'s mixed-coverage partial-answer policy is a designer recommendation, not a stakeholder confirmation | `STORY-007` (the backlog's single most important grounding demonstration) proceeds under an unconfirmed policy | STORY-007 | Product owner | Confirm or override the partial-answer policy before `STORY-007` is signed off as Done; implementation itself is low-cost to reverse if overridden | Before `STORY-007` sign-off, ideally before Increment 4 begins so the policy doesn't need rework |
+| BDR-003 (resolved 2026-08-13) | `ADR-010`'s mixed-coverage partial-answer policy was a designer recommendation, not yet a stakeholder confirmation | None — product owner confirmed partial-answer-with-caveat as final during Increment 4; `STORY-007`'s implementation required no change | STORY-007 | Product owner | None required — resolved | Resolved before `STORY-007` sign-off, during Increment 4 |
 | BDR-004 | No numeric targets exist in the source for `NFR-002` (reproducibility tolerance), `NFR-006` (credit ceiling), `NFR-008` (ease-of-run threshold), or `NFR-009` (code-quality standard) | Acceptance criteria for these are necessarily qualitative; a reviewer could apply a stricter bar than the team assumes | TASK-016 (documents the qualitative approach explicitly) | Product owner / assessor | None required to proceed — documented as a deliberate, source-driven choice, not an oversight, per `TASK-016`'s scope | N/A — resolved by explicit documentation |
 | BDR-005 | The DuckDB migration (`TASK-002` rewrite) adds a new dependency, a repository abstraction, and DuckDB-specific test fixtures on top of an already-tight schedule — design `RSK-007` revises Increment 1's estimate up 0.5–1h, pushing the realistic total to ≈10.5–13.5h against the 8–12h guideline. At the current fixed ~76,000-cell data volume this is not solving a measured performance problem; the stakeholder has explicitly weighed this against the schedule and directed it be committed in full (Must, no Pandas-runtime fallback). A secondary, low-likelihood risk: `duckdb`'s prebuilt wheels cover common platforms but haven't been verified on the actual target environment | Further compresses an already-tight schedule (Medium); low risk of install friction on an unusual platform (Low) | TASK-002 | Engineering lead | Accepted by the stakeholder as a deliberate trade-off — **not** a candidate for scope reduction if time runs short (`BDR-001`'s revised protection order ranks deterministic analysis functions, of which `TASK-002` is a foundation, at priority 2 of 7 — well ahead of the dashboard polish and secondary controls that are the actual cut candidates). Verify the `duckdb`/`pyarrow` install succeeds on the target environment before `TASK-002` implementation begins, per that task's `External` dependency note | Before `TASK-002` begins |
 | BDR-006 (v10, new) | `Period`-typing (design `RSK-009`) touches every period-taking signature across `TASK-002`–`005`/`009` — mechanical (a type change, no formula/query-shape change), but wide enough that a single missed call site could silently leave a raw string flowing through | Low probability of a wrong result; Medium probability of a missed call site if not tracked explicitly | TASK-002, TASK-003, TASK-004, TASK-005, TASK-009, TASK-019 | Engineering lead | Run a static type check (`mypy`/`pyright`) over `core/` before Increment 1 closes (repository/tool layer) and again before Increment 4 closes (`TASK-019`) — both tasks already carry this as a `Definition of done` addition, not left as an unstated expectation | Before Increment 1 and Increment 4 close, respectively |
@@ -2168,6 +2168,6 @@ Every mandatory requirement, component, interface, and material threat from the 
 - **(v11)** Exact tie-breaking logic within `TASK-006`'s `salience_rank` (e.g. magnitude then `la_code`), so long as it is deterministic and documented — the category enum itself is fixed by `ADR-017` and is not a local decision.
 
 **Decisions that require approval before proceeding:**
-- `SPIKE-001`'s tested-default model recommendation — accept or override before Increment 3 begins (owner: engineering lead / product owner).
-- `ADR-010`'s partial-answer policy (`STORY-007`, `BDR-003`) — confirm or override before that story is signed off as Done (owner: product owner).
+- ~~`SPIKE-001`'s tested-default model recommendation — accept or override before Increment 3 begins~~ **Resolved**: confirmed `gpt-4o-mini` (owner: engineering lead / product owner).
+- ~~`ADR-010`'s partial-answer policy (`STORY-007`, `BDR-003`) — confirm or override before that story is signed off as Done~~ **Resolved 2026-08-13**: partial-answer-with-caveat confirmed as final (owner: product owner).
 - Any decision to cut scope under `BDR-001`'s time pressure — should follow `BDR-001`'s revised protection order (dashboard polish and secondary controls first; `STORY-005`/`STORY-006` only after dashboard presentation has already been simplified) and be a visible, documented call, not a silent omission (owner: engineering lead, informed by product owner if user-facing scope is affected).

@@ -16,6 +16,7 @@ nothing to resolve (ADR-012).
 
 from __future__ import annotations
 
+import statistics
 from typing import Literal
 
 from core import metrics
@@ -24,7 +25,10 @@ from core.models import (
     ComparisonResult,
     Dataset,
     GrowthMetricsResult,
+    InsightCandidate,
+    InsightCategory,
     LocalAuthority,
+    PatternScanResult,
     Period,
     PremiumResult,
     PremiumSeriesResult,
@@ -38,12 +42,19 @@ from core.models import (
 )
 from core.repository import Repository
 
+MAX_PER_CATEGORY = 3
+MAX_CANDIDATES = 20
+
 #: Metrics computed from a single period (a plain `Period`, not a range).
-_LEVEL_METRICS: frozenset[str] = frozenset({"price", "premium_pct", "premium_gbp"})
+#: Public (not `_`-prefixed): `agent/agent_definition.py`'s tool wrappers
+#: (`TASK-009`) also need this classification, to dispatch a model-supplied
+#: `period` vs `period_start`/`period_end` correctly rather than duplicating
+#: this list a second time.
+LEVEL_METRICS: frozenset[str] = frozenset({"price", "premium_pct", "premium_gbp"})
 #: Metrics computed from a `(start, end)` period pair -- growth/CAGR are
 #: always range-based (a rate of change needs two points), same as the
 #: (v5) premium-*change* metrics.
-_RANGE_METRICS: frozenset[str] = frozenset(
+RANGE_METRICS: frozenset[str] = frozenset(
     {"growth_pct", "growth_gbp", "cagr_pct", "premium_percentage_point_change", "premium_gbp_change"}
 )
 _PREMIUM_METRICS: frozenset[str] = frozenset(
@@ -284,11 +295,11 @@ def _validate_ranking_call(metric: RankingMetric, period_or_range: Period | tupl
     """A range metric requires a `(start, end)` pair; a level metric
     requires a single `Period` -- never the other shape."""
     if isinstance(period_or_range, tuple):
-        if metric in _LEVEL_METRICS:
+        if metric in LEVEL_METRICS:
             raise InvalidRangeError(f"metric {metric!r} requires a single period, not a range")
         start, end = period_or_range
         _require_valid_range(start, end)
-    elif metric in _RANGE_METRICS:
+    elif metric in RANGE_METRICS:
         raise InvalidRangeError(f"metric {metric!r} requires a (period_start, period_end) range")
 
 
@@ -548,5 +559,230 @@ def compare_areas(
         metric=metric,
         period_label_or_range=_period_label_or_range(period_or_range),
         areas=rows,
+        coverage=coverage,
+    )
+
+
+# -- Deterministic insight-candidate generation (TASK-006) -------------------
+
+#: (v11, ADR-017) Categories that report one *area's* observation --
+#: everything else is scope-wide (`la_code=None`). Kept as a lookup rather
+#: than an if/elif chain per category, so a new category's scope-wide-ness
+#: is a one-line addition, not a new branch elsewhere.
+_AREA_CATEGORIES: frozenset[InsightCategory] = frozenset(
+    {
+        "growth_leader",
+        "growth_laggard",
+        "premium_expansion",
+        "premium_contraction",
+        "regional_divergence",
+        "period_on_period_movement",
+    }
+)
+
+
+def _ranked_candidates(
+    category: InsightCategory,
+    ranked_items: list[tuple[str, float]],
+    value_unit: Literal["pct", "gbp", "count", "pct_point"],
+    la_by_code: dict[str, LocalAuthority],
+    max_per_category: int,
+    summary_fn,
+) -> list[InsightCandidate]:
+    """Turns a pre-sorted (deterministic, ties broken by `la_code`) list of
+    `(la_code, value)` pairs into up to `max_per_category` `InsightCandidate`
+    rows -- shared by every area-scoped category so the salience-rank/
+    evidence-capping/completeness logic exists in exactly one place."""
+    candidates = []
+    for rank, (code, value) in enumerate(ranked_items[:max_per_category], start=1):
+        la = la_by_code[code]
+        candidates.append(
+            InsightCandidate(
+                category=category,
+                salience_rank=rank,
+                la_code=la.la_code,
+                la_name=la.la_name,
+                value=value,
+                value_unit=value_unit,
+                evidence_ids=[la.la_code],
+                data_completeness="complete",  # only areas with a clean, non-suppressed computation ever reach here
+                summary=summary_fn(la, value),
+            )
+        )
+    return candidates
+
+
+def scan_for_patterns(
+    repository: Repository,
+    scope: list[str] | Literal["all"],
+    period_or_range: tuple[Period, Period],
+    max_per_category: int = 1,
+    max_candidates: int = 8,
+    dataset: Dataset = "new_build",
+) -> PatternScanResult:
+    """FR-009: a bounded, categorised, evidence-linked set of deterministic
+    observations -- the agent selects and narrates a subset from it
+    (`ADR-017`); it never computes a pattern itself. (`ADR-014` applies
+    identically to `rank_areas`/`compare_areas`): fetch, join, compute, and
+    select every candidate happens inside this one call.
+
+    `period_or_range` must be a `(start, end)` pair -- every category here
+    is inherently a *change*-over-time or *distribution*-over-time
+    observation (a single point in time has no growth, no premium change,
+    and no period-on-period movement to report), unlike `rank_areas`, which
+    also supports level metrics. This is a deliberate, narrower contract for
+    this function specifically, documented here since neither the backlog
+    nor the design table states it explicitly.
+
+    `dataset` selects new-build vs. existing for the dataset-dependent
+    growth categories (`growth_leader`/`growth_laggard`/
+    `regional_growth_distribution`/`regional_divergence`/
+    `period_on_period_movement`); ignored for the premium categories, which
+    always combine both datasets by definition (`ASM-003`) -- the same
+    `dataset` convention `rank_areas`/`compare_areas` already use. Like
+    `dataset` itself, this parameter is not named in the design's `§8.3`
+    tool-contract table, which omits it for every dataset-dependent metric
+    shape alike; documented here on the same conservative, precedent-
+    following basis as `TASK-005`'s dataset selector.
+    """
+    if not isinstance(period_or_range, tuple):
+        raise InvalidRangeError("scan_for_patterns requires a (period_start, period_end) range")
+    period_start, period_end = period_or_range
+    _require_valid_range(period_start, period_end)
+    if not 1 <= max_per_category <= MAX_PER_CATEGORY:
+        raise InvalidRangeError(f"max_per_category must be between 1 and {MAX_PER_CATEGORY}, got {max_per_category}")
+    if not 1 <= max_candidates <= MAX_CANDIDATES:
+        raise InvalidRangeError(f"max_candidates must be between 1 and {MAX_CANDIDATES}, got {max_candidates}")
+
+    areas, unknown_count = _resolve_scope(repository, scope)
+    la_codes = [la.la_code for la in areas]
+    la_by_code = {la.la_code: la for la in areas}
+
+    # -- one repository round trip covers every growth-based category -------
+    price_rows = repository.get_price_series_multi(la_codes, dataset, period_start.end_date, period_end.end_date)
+    rows_by_area: dict[str, list] = {}
+    for row in price_rows:
+        rows_by_area.setdefault(row.la_code, []).append(row)
+
+    growth_by_area: dict[str, float] = {}
+    period_jump_by_area: dict[str, float] = {}
+    suppressed_observations = 0
+    suppressed_la_codes: list[str] = []
+    for la in areas:
+        area_rows = rows_by_area.get(la.la_code, [])
+        area_suppressed_count = sum(1 for row in area_rows if row.suppressed)
+        suppressed_observations += area_suppressed_count
+        if area_suppressed_count:
+            suppressed_la_codes.append(la.la_code)
+        if len(area_rows) < 2:
+            continue
+        start_row, end_row = area_rows[0], area_rows[-1]
+        if not start_row.suppressed and not end_row.suppressed:
+            assert start_row.price_gbp is not None and end_row.price_gbp is not None
+            growth_by_area[la.la_code] = metrics.growth_pct(start_row.price_gbp, end_row.price_gbp)
+
+        best_jump: float | None = None
+        for previous, current in zip(area_rows, area_rows[1:]):
+            if previous.suppressed or current.suppressed:
+                continue
+            assert previous.price_gbp is not None and current.price_gbp is not None
+            jump = metrics.growth_pct(previous.price_gbp, current.price_gbp)
+            if best_jump is None or abs(jump) > abs(best_jump):
+                best_jump = jump
+        if best_jump is not None:
+            period_jump_by_area[la.la_code] = best_jump
+
+    # -- premium-change per area (reuses rank_areas'/compare_areas' own helper) --
+    premium_change_raw = _premium_range_values(
+        repository, la_codes, "premium_percentage_point_change", period_start, period_end
+    )
+    premium_change_by_area = {
+        code: value for code, (value, suppressed) in premium_change_raw.items() if not suppressed and value is not None
+    }
+
+    candidates: list[InsightCandidate] = []
+
+    if growth_by_area:
+        leaders = sorted(growth_by_area.items(), key=lambda kv: (-kv[1], kv[0]))
+        candidates += _ranked_candidates(
+            "growth_leader", leaders, "pct", la_by_code, max_per_category,
+            lambda la, v: f"{la.la_name} had the highest price growth in scope ({v:+.1f}%).",
+        )
+        laggards = sorted(growth_by_area.items(), key=lambda kv: (kv[1], kv[0]))
+        candidates += _ranked_candidates(
+            "growth_laggard", laggards, "pct", la_by_code, max_per_category,
+            lambda la, v: f"{la.la_name} had the lowest price growth in scope ({v:+.1f}%).",
+        )
+
+        median_growth = statistics.median(growth_by_area.values())
+        evidence = sorted(growth_by_area)[:5]
+        candidates.append(
+            InsightCandidate(
+                category="regional_growth_distribution",
+                salience_rank=1,
+                value=median_growth,
+                value_unit="pct",
+                evidence_ids=evidence,
+                data_completeness="partial" if len(growth_by_area) < len(areas) else "complete",
+                summary=f"Median price growth across {len(growth_by_area)} areas in scope was {median_growth:+.1f}%.",
+            )
+        )
+
+        divergent = sorted(growth_by_area.items(), key=lambda kv: (-abs(kv[1] - median_growth), kv[0]))
+        candidates += _ranked_candidates(
+            "regional_divergence", divergent, "pct", la_by_code, max_per_category,
+            lambda la, v, med=median_growth: (
+                f"{la.la_name}'s growth ({v:+.1f}%) diverged most from the scope's median ({med:+.1f}%)."
+            ),
+        )
+
+    if premium_change_by_area:
+        expansions = sorted(premium_change_by_area.items(), key=lambda kv: (-kv[1], kv[0]))
+        candidates += _ranked_candidates(
+            "premium_expansion", expansions, "pct_point", la_by_code, max_per_category,
+            lambda la, v: f"{la.la_name} saw the largest increase in new-build premium ({v:+.1f} percentage points).",
+        )
+        contractions = sorted(premium_change_by_area.items(), key=lambda kv: (kv[1], kv[0]))
+        candidates += _ranked_candidates(
+            "premium_contraction", contractions, "pct_point", la_by_code, max_per_category,
+            lambda la, v: f"{la.la_name} saw the largest decrease in new-build premium ({v:+.1f} percentage points).",
+        )
+
+    if period_jump_by_area:
+        movements = sorted(period_jump_by_area.items(), key=lambda kv: (-abs(kv[1]), kv[0]))
+        candidates += _ranked_candidates(
+            "period_on_period_movement", movements, "pct", la_by_code, max_per_category,
+            lambda la, v: f"{la.la_name} had the largest single-period movement in scope ({v:+.1f}%).",
+        )
+
+    if suppressed_observations > 0 or unknown_count > 0:
+        candidates.append(
+            InsightCandidate(
+                category="coverage_gap",
+                salience_rank=1,
+                value=float(suppressed_observations + unknown_count),
+                value_unit="count",
+                evidence_ids=sorted(suppressed_la_codes)[:5],
+                data_completeness="partial",
+                summary=(
+                    f"{suppressed_observations} area/period observation(s) in scope were suppressed"
+                    + (f" and {unknown_count} requested area code(s) were unrecognised" if unknown_count else "")
+                    + "."
+                ),
+            )
+        )
+
+    candidates = candidates[:max_candidates]
+
+    coverage = RankingCoverageSummary(
+        areas_in_scope=len(areas) + unknown_count,
+        areas_ranked=len(growth_by_area),
+        areas_excluded=len(areas) + unknown_count - len(growth_by_area),
+        excluded_examples=[la_by_code[code].la_name for code in la_codes if code not in growth_by_area][:5],
+    )
+
+    return PatternScanResult(
+        scope_description=f"{len(areas)} areas, {period_start.label} to {period_end.label}",
+        candidates=candidates,
         coverage=coverage,
     )

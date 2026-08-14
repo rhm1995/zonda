@@ -10,6 +10,10 @@ venv/
 .pytest_cache/
 .mypy_cache/
 
+# Observability logs (TASK-015, design §12) — local-only, never committed
+logs/
+*.jsonl
+
 # VS Code
 .vscode/
 
