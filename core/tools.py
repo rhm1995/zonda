@@ -325,6 +325,16 @@ def _price_level_values(
     return result
 
 
+def _group_by_area(rows: list) -> dict[str, list]:
+    """Groups repository rows returned by a `*_multi` method (ordered
+    `la_code, period_end_date` -- design §8.6) back into per-area lists,
+    the shape `rank_areas`/`compare_areas`' per-area formulas expect."""
+    rows_by_area: dict[str, list] = {}
+    for row in rows:
+        rows_by_area.setdefault(row.la_code, []).append(row)
+    return rows_by_area
+
+
 def _price_range_values(
     repository: Repository,
     la_codes: list[str],
@@ -333,11 +343,9 @@ def _price_range_values(
     period_start: Period,
     period_end: Period,
 ) -> dict[str, tuple[float | None, bool]]:
-    rows = repository.get_price_series_multi(la_codes, dataset, period_start.end_date, period_end.end_date)
-    rows_by_area: dict[str, list] = {}
-    for row in rows:
-        rows_by_area.setdefault(row.la_code, []).append(row)
-
+    rows_by_area = _group_by_area(
+        repository.get_price_series_multi(la_codes, dataset, period_start.end_date, period_end.end_date)
+    )
     result: dict[str, tuple[float | None, bool]] = {}
     for code in la_codes:
         area_rows = rows_by_area.get(code)
@@ -364,13 +372,16 @@ def _price_range_values(
 def _premium_level_values(
     repository: Repository, la_codes: list[str], metric: RankingMetric, period: Period
 ) -> dict[str, tuple[float | None, bool]]:
+    rows_by_area = _group_by_area(
+        repository.get_premium_series_multi(la_codes, period.end_date, period.end_date)
+    )
     result: dict[str, tuple[float | None, bool]] = {}
     for code in la_codes:
-        rows = repository.get_premium_series(code, period.end_date, period.end_date)
-        if not rows:
+        area_rows = rows_by_area.get(code)
+        if not area_rows:
             result[code] = (None, True)
             continue
-        premium_pct_value, premium_gbp_value, suppressed_components = _premium_for_row(rows[0])
+        premium_pct_value, premium_gbp_value, suppressed_components = _premium_for_row(area_rows[0])
         if suppressed_components:
             result[code] = (None, True)
         else:
@@ -386,14 +397,19 @@ def _premium_range_values(
     period_start: Period,
     period_end: Period,
 ) -> dict[str, tuple[float | None, bool]]:
+    rows_by_area = _group_by_area(
+        repository.get_premium_series_multi(la_codes, period_start.end_date, period_end.end_date)
+    )
     result: dict[str, tuple[float | None, bool]] = {}
     for code in la_codes:
-        rows = repository.get_premium_series(code, period_start.end_date, period_end.end_date)
-        if not rows:
+        area_rows = rows_by_area.get(code)
+        if not area_rows:
             result[code] = (None, True)
             continue
-        start_pct, start_gbp, start_suppressed = _premium_for_row(rows[0])
-        end_pct, end_gbp, end_suppressed = _premium_for_row(rows[-1])
+        # Repository orders by (la_code, period_end_date) -- see §8.6.
+        start_row, end_row = area_rows[0], area_rows[-1]
+        start_pct, start_gbp, start_suppressed = _premium_for_row(start_row)
+        end_pct, end_gbp, end_suppressed = _premium_for_row(end_row)
         if start_suppressed or end_suppressed:
             result[code] = (None, True)
             continue
@@ -415,12 +431,14 @@ def _compute_metric_values(
 ) -> dict[str, tuple[float | None, bool]]:
     """(value, suppressed) per `la_code`, computed with the fewest possible
     repository round trips: one `get_price_series_multi` call for the whole
-    scope for price/growth/CAGR metrics (ADR-014's "one call, one complete
-    operation", applied at the repository boundary); a per-area
-    `get_premium_series` call for premium metrics, since the repository
-    contract (design §8.6) has no multi-area premium method -- still one
-    Python-level call to `rank_areas`/`compare_areas`, never a second
-    round trip back through the agent/caller."""
+    scope for price/growth/CAGR metrics, and one `get_premium_series_multi`
+    call for the whole scope for premium metrics (ADR-014's "one call, one
+    complete operation", applied at the repository boundary) -- both fixed,
+    `= ANY(?)`-parameterised queries regardless of scope size. **(v17)**
+    Premium metrics previously issued one `get_premium_series` call per
+    area; batched here after a code-review finding (`REV-012`, `TASK-005`)
+    measured the per-area loop at ~150x slower than one batched query for a
+    full-scope ranking, with no behaviour difference."""
     if metric == "price":
         assert isinstance(period_or_range, Period)
         return _price_level_values(repository, la_codes, dataset, period_or_range)

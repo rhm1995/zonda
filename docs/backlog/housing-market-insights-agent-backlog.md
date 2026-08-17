@@ -570,15 +570,16 @@ Pure functions — `new_build_premium`, `premium_trend`, **(v8/v9) `premium_seri
 **Suggested Jira component:** ui
 
 **Outcome**
-A pure function that serialises an already-computed result object (`GrowthMetricsResult`, later `RankingResult`) to CSV bytes, with no parallel computation path — the same object that renders on screen is what gets exported.
+A pure function that serialises an already-computed result object (`GrowthMetricsResult`, **(v8/v9) `PremiumSeriesResult`**, later `RankingResult`) to CSV bytes, with no parallel computation path — the same object that renders on screen is what gets exported.
 
 **Context**
-`DR-008`/`NFR-012` require export fidelity and reproducibility. `ADR-013` deliberately avoids a second query/computation path for exports, since that is exactly how displayed and exported figures could silently drift apart over time.
+`DR-008`/`NFR-012` require export fidelity and reproducibility. `ADR-013` deliberately avoids a second query/computation path for exports, since that is exactly how displayed and exported figures could silently drift apart over time. **(this pass, corrected)** This ticket's Scope/Acceptance Criteria never got updated when `STORY-001`'s premium-mode chart (v8/v9) was added elsewhere in this document — `STORY-001`'s own Scope already says its CSV export covers `PremiumSeriesResult` (see its "Download CSV" bullet), but this ticket's signature and acceptance criteria still only named `GrowthMetricsResult`/`RankingResult`. Found during code review (`[REV-008]`); the implementation (`ui/export.py`) already correctly includes and tests the `PremiumSeriesResult` branch — only this ticket's text was stale, not the code.
 
 **Scope**
-- `ui/export.py`: `export(result: GrowthMetricsResult | RankingResult) -> bytes`.
+- `ui/export.py`: `export(result: GrowthMetricsResult | PremiumSeriesResult | RankingResult) -> bytes` **(v8/v9, corrected)**.
 - Direct tabular projection of the input object's fields — no rounding, unit conversion, or recomputation.
 - Suppressed periods/areas included in the export with an explicit flag column, not omitted (per the requirements package's resolution of its own open question, §12 Q7).
+- **(v8/v9, corrected)** `PremiumSeriesResult` export is one row per period in the range (mirroring `TrendResult`'s per-period shape), with `suppressed`/`suppressed_components` columns for each point — the same non-omission rule as the other two branches.
 - Wiring into `st.download_button` is the consuming tab's responsibility (`STORY-001`, `STORY-002`), not this task.
 
 **Out of scope**
@@ -593,20 +594,22 @@ A pure function that serialises an already-computed result object (`GrowthMetric
 2. Given a `GrowthMetricsResult` with suppressed periods, when exported, then those periods appear in the CSV with an explicit suppressed flag and a blank/marked price — not omitted.
 3. Exporting the same object twice produces byte-identical CSV content (`NFR-012`).
 4. The function raises no exception and performs no network or file-system side effect beyond returning bytes.
+5. **(v8/v9, added)** Given a `PremiumSeriesResult`, when exported, then the resulting CSV, re-parsed, contains one row per period in `points` (not just the two endpoints) and numerically matches every point's fields exactly.
+6. **(v8/v9, added)** Given a `PremiumSeriesResult` with a point whose `suppressed_components` is non-empty, when exported, then that point appears in the CSV with an explicit suppressed flag and blank price/premium fields — not omitted, consistent with acceptance criterion 2's rule for `GrowthMetricsResult`.
 
 **Verification**
-- Unit tests: round-trip fidelity, suppressed-value marking, repeat-export byte equality.
+- Unit tests: round-trip fidelity, suppressed-value marking, repeat-export byte equality — **(v8/v9, added)** including the `PremiumSeriesResult` branch specifically, not only `GrowthMetricsResult`/`RankingResult`.
 
 **Dependencies**
 - `Blocks:` STORY-001
 - `Precedes:` None
-- `Related:` TASK-005 (RankingResult branch), STORY-002
+- `Related:` TASK-004 (`PremiumSeriesResult` branch) **(v8/v9, added)**, TASK-005 (RankingResult branch), STORY-002
 - `External:` None
 
 **Traceability**
 - Requirements: DR-008, NFR-012, FR-034, FR-041
 - Components: CMP-016
-- Interfaces or schemas: `GrowthMetricsResult`, `RankingResult` (design §6.3, §8.5)
+- Interfaces or schemas: `GrowthMetricsResult`, `PremiumSeriesResult` **(v8/v9, added)**, `RankingResult` (design §6.3, §8.5)
 - ADRs: ADR-013
 - Threats, risks, or assumptions: None
 
@@ -710,7 +713,7 @@ Powers `STORY-002` (Compare and rank) directly and, later, the agent's compariso
 - `rank_areas(metric, period_or_range, scope, top_n, direction) -> RankingResult` — `metric` ∈ `{price, growth_pct, growth_gbp, cagr_pct, premium_pct, premium_gbp, premium_percentage_point_change, premium_gbp_change}` **(v5: last two added)**. For a change-based metric, `period_or_range` is a `(start, end)` pair, not a single period.
 - `compare_areas(areas, metric, period_or_range) -> ComparisonResult` (unordered variant, for direct comparison rather than ranking) — same extended metric set.
 - `top_n` bounded (1–50) to prevent pathological output size.
-- Each `RankedArea`/comparison row carries an explicit `suppressed: bool` for areas with no usable figure for part of the requested scope — excluded from the ranking order but visibly flagged, not silently dropped.
+- Each `RankedArea`/comparison row carries an explicit `suppressed: bool` for areas with no usable figure for part of the requested scope. **(this pass, corrected — `[REV-011]`)** This bullet predates the `v6` `coverage` field below and was never reconciled with it, so its "visibly flagged, not silently dropped" wording only holds for one of the two functions: in `compare_areas` (no `top_n` truncation), every resolved area gets a row, with suppressed ones flagged via `suppressed=True`/`value=None`, never dropped. In `rank_areas`, an ineligible area is never assigned a row/rank at all — `v6`'s bounding rule (below) means it is instead counted in `coverage.areas_excluded` and named, up to 5, in `coverage.excluded_examples`, not returned as a row. Both behaviours are implemented and tested exactly this way (`tests/unit/test_rank_areas.py`); this bullet previously implied `rank_areas` also returns a flagged row for such an area, which it does not.
 - **(v6, new)** Both functions return a `coverage: RankingCoverageSummary` field — `areas_in_scope`, `areas_ranked`, `areas_excluded`, and `excluded_examples` (capped at 5 area names, never a full enumeration) — so the caller can state how many areas were considered/excluded without being handed the full candidate set to count itself.
 - **(v6, new)** `max_per_category`-style bounding does not apply here (that's `TASK-006`'s concern), but the same underlying rule does: this task's functions never return more than `top_n` rows plus the bounded `coverage` summary — no intermediate per-area row set crosses back to a caller.
 - Completes `TASK-007`'s `RankingResult` CSV-export branch (coordinate with that task; either task may land first, but both must be complete before `STORY-002`).
@@ -731,7 +734,7 @@ Powers `STORY-002` (Compare and rank) directly and, later, the agent's compariso
 1. Given a scope of areas including Manchester and at least 4 others with known figures, when `rank_areas(metric="premium_pct", period="Year ending Sep 2025", top_n=5, direction="top")` is called, then Manchester's premium (23.75%, per `TASK-004`) appears correctly positioned relative to the others' known figures.
 2. **(v5)** Given the same scope and `rank_areas(metric="premium_percentage_point_change", period_or_range=("Year ending Sep 2015", "Year ending Sep 2025"), top_n=5, direction="top")`, when called, then areas are ranked by `premium_percentage_point_change` (per `TASK-004`'s formula), not by premium level at either endpoint — a materially different ordering from criterion 1 for at least some fixture areas.
 3. Given `top_n=5` and a scope of more than 5 areas, when ranked, then exactly 5 rows are returned, ordered per `direction`.
-4. Given an area in scope has no usable figure for part of the requested period range, when ranked, then that area is flagged `suppressed=True` in its row rather than silently omitted from the result set.
+4. **(this pass, corrected — `[REV-011]`)** Given an area in scope has no usable figure for part of the requested period range: for `compare_areas`, that area's row is still returned, flagged `suppressed=True` with `value=None`, never omitted; for `rank_areas`, that area is never assigned a row/rank — it is instead counted in `coverage.areas_excluded` and named (up to 5) in `coverage.excluded_examples`, per `v6`'s bounding rule (`ADR-014`). The original wording ("flagged `suppressed=True` in its row... not silently omitted from the result set") only ever held for `compare_areas`; `rank_areas`'s own bounded-output design (`v6`, this ticket's own Scope) means an excluded area's row does not exist in its `rows` list at all.
 5. Given `top_n=100` is requested, when called, then it is rejected/clamped per the bounded range (1–50), not silently accepted.
 6. **(v6)** Given a scope where some areas are ineligible for the requested metric/period (e.g. no usable data at all), when ranked, then `coverage.areas_excluded` correctly counts them and `coverage.excluded_examples` lists at most 5 by name — never the full excluded set.
 7. **(v6)** Given a stubbed-model integration test drives a ranking question end to end, when observed, then `rank_areas` is called exactly once for that question — no second tool call is made to sort or filter rows the first call already returned.
@@ -876,7 +879,7 @@ This is the literal, testable form of `NFR-011`/`ADR-011`. The requirements pack
 - Threats, risks, or assumptions: RSK-005 (requirements package), RSK-006b (design)
 
 **Definition of done additions**
-- Import-linter configuration is committed and runs as part of the standard lint/test command documented in the README.
+- **(this pass, corrected — `[REV-015]`)** A static import check (`tests/unit/test_zero_api_guarantee.py`) is committed and runs as part of the standard `pytest` command documented in the README. The original wording named the `import-linter` package specifically, but this ticket's own Scope explicitly permits "an import-linter (**or equivalent static**) rule" — the implemented AST-based pytest check is that equivalent, not a deviation from it; no `import-linter` dependency or config file exists anywhere in the repo, and the README already accurately describes the check actually built.
 
 **Open questions**
 - None.

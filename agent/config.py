@@ -114,7 +114,7 @@ def load_config(
     real log file during every test run or require every such test to know
     about and disable logging explicitly. Attaching the handler is instead
     each real entry point's own explicit, one-time startup responsibility
-    (`ui/dashboard.py`, `eval/run_eval.py`) -- `load_config` only resolves
+    (`ui/ask_the_data.py`, `eval/run_eval.py`) -- `load_config` only resolves
     *what* `log_file`/`log_level` should be, never attaches anything itself.
     """
     load_dotenv(dotenv_path=env_file, override=False)

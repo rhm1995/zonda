@@ -169,6 +169,44 @@ def test_get_price_series_multi_uses_one_fixed_query_for_any_area_count(basic_fi
     assert len(single) == 3
 
 
+def test_get_premium_series_multi_matches_per_area_get_premium_series(basic_fixture: Path) -> None:
+    """(v17, REV-012) The batched method must return exactly the rows the
+    single-area method would for each requested area -- same join, same
+    suppression flags, same values -- just fetched in one round trip."""
+    repo = Repository.open(basic_fixture)
+    batched = repo.get_premium_series_multi(
+        ["E06000001", "E06000002"], date(2015, 1, 1), date(2023, 1, 1)
+    )
+    assert {r.la_code for r in batched} == {"E06000001", "E06000002"}
+    assert len(batched) == 6  # 3 periods x 2 areas
+
+    for code in ["E06000001", "E06000002"]:
+        individual = repo.get_premium_series(code, date(2015, 1, 1), date(2023, 1, 1))
+        from_batch = [r for r in batched if r.la_code == code]
+        assert [r.model_dump() for r in from_batch] == [r.model_dump() for r in individual]
+
+
+def test_get_premium_series_multi_uses_one_fixed_query_for_any_area_count(basic_fixture: Path) -> None:
+    repo = Repository.open(basic_fixture)
+    result = repo.get_premium_series_multi(["E06000001"], date(2015, 1, 1), date(2023, 1, 1))
+    assert len(result) == 3
+
+    result = repo.get_premium_series_multi([], date(2015, 1, 1), date(2023, 1, 1))
+    assert result == []
+
+
+def test_get_premium_series_multi_orders_by_area_then_date(basic_fixture: Path) -> None:
+    """Grouping by `la_code` in `core/tools.py` relies on this ordering
+    (design §8.6, same convention as `get_price_series_multi`)."""
+    repo = Repository.open(basic_fixture)
+    result = repo.get_premium_series_multi(
+        ["E06000002", "E06000001"], date(2015, 1, 1), date(2023, 1, 1)
+    )
+    assert [r.la_code for r in result] == ["E06000001"] * 3 + ["E06000002"] * 3
+    la_a_dates = [r.period_end_date for r in result if r.la_code == "E06000001"]
+    assert la_a_dates == sorted(la_a_dates)
+
+
 def test_get_geography_reference_returns_typed_records_with_aliases(basic_fixture: Path) -> None:
     repo = Repository.open(basic_fixture)
     result = repo.get_geography_reference()

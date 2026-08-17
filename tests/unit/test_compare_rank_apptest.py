@@ -11,6 +11,9 @@ from pathlib import Path
 import pytest
 from streamlit.testing.v1 import AppTest
 
+from core.repository import Repository
+from ui.compare_rank import MAX_COMPARISON_AREAS
+
 REPO_ROOT = Path(__file__).resolve().parents[2]
 PROCESSED_DIR = REPO_ROOT / "data" / "processed"
 
@@ -83,3 +86,34 @@ def test_csv_download_available_with_no_openai_related_error() -> None:
     _select_areas(app, "Manchester", "Birmingham")
     assert app.exception == []
     assert not any("openai" in str(e).lower() for e in app.exception)
+
+
+def test_area_selector_is_capped_at_max_comparison_areas() -> None:
+    """(REV-014) The widget itself enforces the cap -- asserted directly on
+    the rendered element's configured `max_selections`, not by attempting a
+    one-past-the-limit selection: `AppTest`'s synthetic `.select()` chain
+    updates `widget_state.value` immediately, so scripting a selection past
+    `max_selections` raises `StreamlitSelectionCountExceedsMaxError` in the
+    harness itself (verified separately, not representative of a real
+    browser, where the frontend disables further options instead) --
+    asserting the configured bound directly is the correct, non-fragile
+    check here."""
+    app = _run_dashboard()
+    widget = app.multiselect(key="compare_rank_areas")
+    assert widget.max_selections == MAX_COMPARISON_AREAS
+
+
+def test_selecting_exactly_the_max_comparison_areas_does_not_raise() -> None:
+    """(REV-014) The cap must not be off-by-one -- exactly
+    `MAX_COMPARISON_AREAS` real areas must still be selectable and render a
+    full ranking with no exception."""
+    repository = Repository.open(PROCESSED_DIR)
+    area_names = sorted(la.la_name for la in repository.get_geography_reference())[:MAX_COMPARISON_AREAS]
+    assert len(area_names) == MAX_COMPARISON_AREAS
+
+    app = _run_dashboard()
+    _select_areas(app, *area_names)
+    assert app.exception == []
+    assert app.dataframe
+    table = app.dataframe[0].value
+    assert len(table) <= MAX_COMPARISON_AREAS

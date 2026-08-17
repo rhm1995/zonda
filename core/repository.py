@@ -201,6 +201,44 @@ class Repository:
             columns = [d[0] for d in self._connection.description]
         return [PricePoint(**dict(zip(columns, row))) for row in rows]
 
+    def get_premium_series_multi(
+        self, la_codes: list[str], period_start: date, period_end: date
+    ) -> list[PremiumRow]:
+        """Multi-area counterpart to `get_premium_series` -- same self-join,
+        widened from `nb.la_code = ?` to `nb.la_code = ANY(?)`, fixed query
+        text regardless of area count, mirroring `get_price_series_multi`'s
+        pattern exactly (design §8.6, v17). Powers `rank_areas`/
+        `compare_areas`'s premium-based metrics in one round trip instead of
+        one call per area -- a code-review finding (`REV-012`, `TASK-005`)
+        that measured the per-area loop at ~150x slower than this batched
+        query for a full-scope ranking. `get_premium_series` itself is
+        unchanged and remains what `new_build_premium`/`premium_trend`/
+        `premium_series` (single-area, TASK-004) call."""
+        sql = """
+            SELECT
+                nb.la_code AS la_code,
+                nb.la_name AS la_name,
+                nb.period_label AS period_label,
+                nb.period_end_date AS period_end_date,
+                nb.price_gbp AS new_build_price,
+                nb.suppressed AS new_build_suppressed,
+                ex.price_gbp AS existing_price,
+                ex.suppressed AS existing_suppressed
+            FROM price_points nb
+            JOIN price_points ex
+              ON nb.la_code = ex.la_code AND nb.period_label = ex.period_label
+            WHERE nb.dataset = 'new_build' AND ex.dataset = 'existing'
+              AND nb.la_code = ANY(?)
+              AND nb.period_end_date BETWEEN ? AND ?
+            ORDER BY nb.la_code, nb.period_end_date
+        """
+        with self._lock:
+            rows = self._connection.execute(
+                sql, [la_codes, period_start, period_end]
+            ).fetchall()
+            columns = [d[0] for d in self._connection.description]
+        return [PremiumRow(**dict(zip(columns, row))) for row in rows]
+
     def get_geography_reference(self) -> list[LocalAuthority]:
         """Powers selector population (`ui/explore_trends.py`,
         `ui/compare_rank.py`) and the alias table behind the geography

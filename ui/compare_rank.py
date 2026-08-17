@@ -20,6 +20,18 @@ Ranks the user's own selected areas (via `rank_areas` with `top_n` set to
 the full selection size) rather than scanning the full 318-area scope --
 "top/bottom ranking of the *selected* areas" (FR-038), not open-ended
 discovery.
+
+Implementation note (code-review finding `REV-014`, `TASK-005` review):
+the area multiselect is capped at `MAX_COMPARISON_AREAS`, a UI-owned bound
+distinct from `core.tools.MAX_TOP_N`. Before this fix, selecting more than
+`MAX_TOP_N` areas let `top_n=min(len(selected_codes), MAX_TOP_N)` silently
+truncate the ranking -- `RankingResult.coverage.areas_excluded` only counts
+areas with no usable *data*, not areas cut for output-size reasons, so the
+excluded areas were invisible to both the user and the exclusion caption
+below. Capping the widget itself (rather than raising `MAX_TOP_N`, or
+truncating and warning after the fact) prevents the invalid state from
+being reachable at all, the same "closed selector" principle `ADR-012`
+already applies to area/period selection generally.
 """
 
 from __future__ import annotations
@@ -46,6 +58,14 @@ _METRIC_OPTIONS: list[tuple[RankingMetric, str]] = [
 _METRIC_LABELS = dict(_METRIC_OPTIONS)
 _RANGE_METRICS = {"growth_gbp", "growth_pct", "cagr_pct"}
 _DATASET_DEPENDENT_METRICS = {"price", "growth_gbp", "growth_pct", "cagr_pct"}
+
+#: UI-owned cap on how many areas can be compared at once -- a chart/table
+#: legibility bound, deliberately distinct from `core.tools.MAX_TOP_N`
+#: (which bounds ranking *output* size for a large scan, a different
+#: concern that happens to share no relationship with this one). Fixes
+#: `REV-014`: without a widget-level cap, selecting more than `MAX_TOP_N`
+#: areas silently dropped the excess from the ranking with no indication.
+MAX_COMPARISON_AREAS = 20
 
 
 def _format_value(metric: RankingMetric, value: float | None) -> str:
@@ -97,7 +117,12 @@ def render() -> None:
 
     code_by_name = {name: code for code, name in areas}
     selected_names = st.multiselect(
-        "Areas", sorted(code_by_name), default=[], key="compare_rank_areas"
+        "Areas",
+        sorted(code_by_name),
+        default=[],
+        max_selections=MAX_COMPARISON_AREAS,
+        help=f"Compare up to {MAX_COMPARISON_AREAS} areas at a time.",
+        key="compare_rank_areas",
     )
     if len(selected_names) < 2:
         st.info("Select two or more areas to compare.")
@@ -156,6 +181,12 @@ def render() -> None:
             metric=metric,
             period_or_range=period_or_range,
             scope=selected_codes,
+            # The multiselect's max_selections=MAX_COMPARISON_AREAS above
+            # already guarantees len(selected_codes) <= MAX_COMPARISON_AREAS
+            # < MAX_TOP_N, so this min() is defence-in-depth (REV-014) --
+            # rank_areas' own bound never actually truncates a selection in
+            # practice, but stays here so a future change to the widget
+            # cap can't silently reopen the silent-truncation gap.
             top_n=min(len(selected_codes), MAX_TOP_N),
             direction=direction,
             dataset=dataset,
